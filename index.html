@@ -3,84 +3,331 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Aureum Dashboard</title>
+    <title>Aureum - Ultimate Crypto Platform</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: system-ui, -apple-system, sans-serif; }
         .animate-pulse { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
         @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .5; } }
-        .chat-scroll { max-height: 350px; overflow-y: auto; }
+        @keyframes slideIn { from { transform: translateX(100%); } to { transform: translateX(0); } }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes bounce { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-10px); } }
+        .slide-in { animation: slideIn 0.3s ease-out; }
+        .fade-in { animation: fadeIn 0.3s ease-out; }
+        .bounce { animation: bounce 1s ease-in-out infinite; }
+        .chat-scroll { max-height: 400px; overflow-y: auto; }
         .chat-scroll::-webkit-scrollbar { width: 6px; }
         .chat-scroll::-webkit-scrollbar-thumb { background: #475569; border-radius: 3px; }
+        .news-scroll { max-height: 500px; overflow-y: auto; }
+        .bubble { border-radius: 50%; display: inline-block; position: relative; }
+        .voice-indicator { 
+            width: 100px; 
+            height: 100px; 
+            border-radius: 50%; 
+            background: radial-gradient(circle, rgba(239, 68, 68, 0.6), rgba(239, 68, 68, 0));
+            animation: voicePulse 1.5s ease-in-out infinite;
+        }
+        @keyframes voicePulse {
+            0%, 100% { transform: scale(1); opacity: 0.6; }
+            50% { transform: scale(1.2); opacity: 0.3; }
+        }
+        .achievement-badge {
+            position: relative;
+            transition: transform 0.3s;
+        }
+        .achievement-badge:hover {
+            transform: scale(1.1);
+        }
+        .level-bar {
+            height: 8px;
+            background: linear-gradient(90deg, #ef4444, #f59e0b, #10b981);
+            border-radius: 10px;
+        }
+        .notification-toast {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 100;
+            animation: slideIn 0.3s ease-out;
+        }
     </style>
 </head>
 <body class="bg-black text-white">
     <div id="app"></div>
+    <div id="notifications"></div>
+    <div id="voiceModal"></div>
     
     <script>
         const app = document.getElementById('app');
+        const notificationsContainer = document.getElementById('notifications');
         
+        // ============ STATE MANAGEMENT ============
+        let activeTab = 'portfolio';
         let livePrice = null;
+        let liveTokenData = {};
         let watchlist = ['ETH', 'BTC', 'PEPE'];
         let showChat = false;
+        let searchQuery = '';
+        let selectedToken = null;
+        let walletConnected = false;
+        let walletAddress = null;
+        let userLevel = 5;
+        let userXP = 2340;
+        let nextLevelXP = 3000;
+        let showVoiceModal = false;
+        let isListening = false;
+        let paperTradingMode = true;
+        let paperBalance = 100000;
+        let paperTrades = [];
+        let activeStrategy = null;
+        
+        // Achievements
+        let achievements = [
+            { id: 1, name: 'First Trade', icon: '🎯', unlocked: true, xp: 100 },
+            { id: 2, name: 'Whale Watcher', icon: '🐋', unlocked: true, xp: 250 },
+            { id: 3, name: 'Diamond Hands', icon: '💎', unlocked: false, xp: 500 },
+            { id: 4, name: 'Smart Money', icon: '🧠', unlocked: true, xp: 300 },
+            { id: 5, name: 'Speed Trader', icon: '⚡', unlocked: false, xp: 200 },
+            { id: 6, name: 'Portfolio Master', icon: '👑', unlocked: false, xp: 1000 }
+        ];
+        
+        // Alerts
+        let alerts = [
+            { id: 1, type: 'price', token: 'ETH', condition: 'above', value: 2600, active: true },
+            { id: 2, type: 'whale', token: 'BTC', threshold: 1000000, active: true }
+        ];
+        
+        // Social Trading Feed
+        let socialFeed = [
+            { id: 1, trader: 'CryptoKing', avatar: '👑', action: 'bought', token: 'SOL', amount: '$50K', time: '2m ago', followers: 12453 },
+            { id: 2, trader: 'WhaleWatcher', avatar: '🐋', action: 'sold', token: 'ETH', amount: '$120K', time: '5m ago', followers: 8932 },
+            { id: 3, trader: 'DefiMaster', avatar: '🔥', action: 'bought', token: 'LINK', amount: '$30K', time: '8m ago', followers: 7821 },
+            { id: 4, trader: 'TokenSniper', avatar: '🎯', action: 'bought', token: 'ARB', amount: '$25K', time: '12m ago', followers: 6234 }
+        ];
+        
+        // News Feed
+        let newsFeed = [
+            { id: 1, title: 'Ethereum Upgrade Successfully Deployed', source: 'CoinDesk', sentiment: 'bullish', time: '1h ago', impact: 'high', tokens: ['ETH'] },
+            { id: 2, title: 'Major Institution Announces Bitcoin Accumulation', source: 'Bloomberg', sentiment: 'bullish', time: '2h ago', impact: 'high', tokens: ['BTC'] },
+            { id: 3, title: 'SEC Approves New Crypto Framework', source: 'Reuters', sentiment: 'bullish', time: '3h ago', impact: 'medium', tokens: ['ALL'] },
+            { id: 4, title: 'DeFi TVL Reaches New All-Time High', source: 'DeFi Pulse', sentiment: 'bullish', time: '4h ago', impact: 'medium', tokens: ['AAVE', 'UNI'] }
+        ];
+        
+        // Whale Activity
+        let whaleActivity = [
+            { id: 1, wallet: '0x742d...E7aB', action: 'transferred', amount: '15,000 ETH', value: '$38.1M', time: '15m ago' },
+            { id: 2, wallet: '0x8b3a...C92F', action: 'bought', amount: '500 BTC', value: '$21.9M', time: '45m ago' },
+            { id: 3, wallet: '0x3f2e...A1D4', action: 'sold', amount: '2M SOL', value: '$196.9M', time: '1h ago' }
+        ];
+        
+        // Chat messages
         let chatMessages = [
-            { type: 'ai', text: 'Hi! I\'m your AI trading assistant. Try asking me about:\n\n• Token prices and analysis\n• Market trends\n• Portfolio advice\n• Risk assessment\n\nJust type your question below!' }
+            { type: 'ai', text: 'Hi! I\'m your advanced AI assistant with:\n\n🤖 ML Predictions\n📊 Technical Analysis\n🐋 Whale Tracking\n🎯 Strategy Builder\n💡 Portfolio Optimization\n\nWhat can I help you with?' }
         ];
         let isTyping = false;
         
-        const tokenData = {
-            'ETH': { name: 'Ethereum', price: '$2,543', change: '+3.45%', positive: true },
-            'BTC': { name: 'Bitcoin', price: '$43,821', change: '+1.23%', positive: true },
-            'PEPE': { name: 'Pepe', price: '$0.0000012', change: '-2.34%', positive: false }
+        // Community rooms
+        let communityRooms = [
+            { id: 1, name: 'ETH Lounge', members: 1243, online: 342, icon: '💎' },
+            { id: 2, name: 'BTC Maxis', members: 2891, online: 721, icon: '₿' },
+            { id: 3, name: 'DeFi Degens', members: 892, online: 156, icon: '🔥' },
+            { id: 4, name: 'Whale Watch', members: 534, online: 98, icon: '🐋' }
+        ];
+        
+        // Strategies
+        let strategies = [
+            { id: 1, name: 'RSI Oversold', description: 'Buy when RSI < 30', roi: '+45%', wins: 23, losses: 7, active: false },
+            { id: 2, name: 'Whale Following', description: 'Copy large wallet moves', roi: '+67%', wins: 31, losses: 9, active: false },
+            { id: 3, name: 'News Momentum', description: 'Trade on positive news', roi: '+38%', wins: 19, losses: 11, active: false }
+        ];
+        
+        const allTokens = ['ETH', 'BTC', 'PEPE', 'SOL', 'ARB', 'MATIC', 'LINK', 'UNI', 'AAVE'];
+        
+        const mockTokenData = {
+            'ETH': { name: 'Ethereum', price: '$2,543', priceNum: 2543, change: '+3.45%', positive: true, marketCap: '$305B', volume: '$12.5B', prediction24h: '+5.2%', confidence: '73%', sentiment: 'bullish' },
+            'BTC': { name: 'Bitcoin', price: '$43,821', priceNum: 43821, change: '+1.23%', positive: true, marketCap: '$857B', volume: '$23.4B', prediction24h: '+2.1%', confidence: '68%', sentiment: 'bullish' },
+            'PEPE': { name: 'Pepe', price: '$0.0000012', priceNum: 0.0000012, change: '-2.34%', positive: false, marketCap: '$504M', volume: '$89M', prediction24h: '-1.5%', confidence: '45%', sentiment: 'bearish' },
+            'SOL': { name: 'Solana', price: '$98.45', priceNum: 98.45, change: '+5.67%', positive: true, marketCap: '$42B', volume: '$1.8B', prediction24h: '+6.8%', confidence: '82%', sentiment: 'bullish' },
+            'ARB': { name: 'Arbitrum', price: '$1.23', priceNum: 1.23, change: '+2.15%', positive: true, marketCap: '$1.5B', volume: '$234M', prediction24h: '+3.2%', confidence: '65%', sentiment: 'neutral' },
+            'MATIC': { name: 'Polygon', price: '$0.89', priceNum: 0.89, change: '-1.45%', positive: false, marketCap: '$8.2B', volume: '$456M', prediction24h: '-0.8%', confidence: '58%', sentiment: 'neutral' },
+            'LINK': { name: 'Chainlink', price: '$14.56', priceNum: 14.56, change: '+4.23%', positive: true, marketCap: '$8.5B', volume: '$567M', prediction24h: '+5.1%', confidence: '76%', sentiment: 'bullish' },
+            'UNI': { name: 'Uniswap', price: '$6.78', priceNum: 6.78, change: '+1.89%', positive: true, marketCap: '$5.1B', volume: '$234M', prediction24h: '+2.3%', confidence: '62%', sentiment: 'neutral' },
+            'AAVE': { name: 'Aave', price: '$95.34', priceNum: 95.34, change: '-0.56%', positive: false, marketCap: '$1.4B', volume: '$123M', prediction24h: '+1.2%', confidence: '54%', sentiment: 'neutral' }
         };
         
-        // AI Response Logic
+        // ============ UTILITY FUNCTIONS ============
+        
+        function showNotification(title, message, type = 'info') {
+            const id = Date.now();
+            const colors = {
+                success: 'from-green-600 to-green-700',
+                error: 'from-red-600 to-red-700',
+                warning: 'from-yellow-600 to-yellow-700',
+                info: 'from-blue-600 to-blue-700'
+            };
+            
+            const notification = document.createElement('div');
+            notification.className = `notification-toast bg-gradient-to-r ${colors[type]} border border-white/20 rounded-xl p-4 mb-3 shadow-2xl max-w-sm`;
+            notification.innerHTML = `
+                <div class="flex items-start justify-between">
+                    <div>
+                        <div class="font-bold mb-1">${title}</div>
+                        <div class="text-sm opacity-90">${message}</div>
+                    </div>
+                    <button onclick="this.parentElement.parentElement.remove()" class="text-white/80 hover:text-white ml-4">×</button>
+                </div>
+            `;
+            
+            notificationsContainer.appendChild(notification);
+            
+            setTimeout(() => {
+                notification.remove();
+            }, 5000);
+        }
+        
+        function addXP(amount) {
+            userXP += amount;
+            if (userXP >= nextLevelXP) {
+                userLevel++;
+                userXP = userXP - nextLevelXP;
+                nextLevelXP = Math.floor(nextLevelXP * 1.5);
+                showNotification('Level Up! 🎉', `You reached level ${userLevel}!`, 'success');
+            }
+            render();
+        }
+        
+        function unlockAchievement(id) {
+            const achievement = achievements.find(a => a.id === id);
+            if (achievement && !achievement.unlocked) {
+                achievement.unlocked = true;
+                addXP(achievement.xp);
+                showNotification('Achievement Unlocked! 🏆', `${achievement.icon} ${achievement.name} (+${achievement.xp} XP)`, 'success');
+            }
+        }
+        
+        function connectWallet() {
+            walletConnected = true;
+            walletAddress = '0x' + Math.random().toString(16).substr(2, 40);
+            unlockAchievement(1);
+            showNotification('Wallet Connected! 🎉', 'Successfully connected to MetaMask', 'success');
+            render();
+        }
+        
+        function disconnectWallet() {
+            walletConnected = false;
+            walletAddress = null;
+            showNotification('Wallet Disconnected', 'Your wallet has been disconnected', 'info');
+            render();
+        }
+        
+        function executePaperTrade(action, token, amount) {
+            const tokenData = getTokenData(token);
+            const price = tokenData.priceNum;
+            const value = amount;
+            
+            if (action === 'buy') {
+                if (value > paperBalance) {
+                    showNotification('Insufficient Balance', 'Not enough funds for this trade', 'error');
+                    return;
+                }
+                paperBalance -= value;
+                paperTrades.push({
+                    id: Date.now(),
+                    action: 'buy',
+                    token,
+                    amount: value / price,
+                    price: price,
+                    value: value,
+                    timestamp: new Date()
+                });
+                showNotification('Trade Executed! 📈', `Bought ${token} for $${value.toFixed(2)}`, 'success');
+                addXP(50);
+            }
+            
+            render();
+        }
+        
+        function toggleStrategy(id) {
+            const strategy = strategies.find(s => s.id === id);
+            if (strategy) {
+                strategy.active = !strategy.active;
+                activeStrategy = strategy.active ? strategy : null;
+                if (strategy.active) {
+                    showNotification('Strategy Activated! 🎯', `${strategy.name} is now running`, 'success');
+                    addXP(100);
+                }
+                render();
+            }
+        }
+        
+        // ============ AI & VOICE ============
+        
         function getAIResponse(message) {
             const msg = message.toLowerCase();
             
+            // ML Prediction
+            if (msg.includes('predict') || msg.includes('forecast') || msg.includes('ml')) {
+                if (msg.includes('eth') || msg.includes('ethereum')) {
+                    const token = getTokenData('ETH');
+                    return `**🤖 ML Prediction for ETH:**\n\n📊 24h Forecast: ${token.prediction24h}\n🎯 Confidence: ${token.confidence}\n💭 Sentiment: ${token.sentiment}\n\nCurrent: ${token.price} (${token.change})\n\nML models suggest ${token.prediction24h.startsWith('+') ? 'bullish' : 'bearish'} momentum based on:\n• Volume trends\n• Whale activity\n• Social sentiment\n• Technical indicators`;
+                }
+                return 'I can predict price movements using ML models. Try: "Predict ETH price" or "ML forecast for BTC"';
+            }
+            
+            // Whale tracking
+            if (msg.includes('whale')) {
+                return `**🐋 Recent Whale Activity:**\n\n${whaleActivity.slice(0, 2).map(w => `• ${w.action.toUpperCase()} ${w.amount} (${w.value}) - ${w.time}`).join('\n')}\n\nWould you like whale alerts for a specific token?`;
+            }
+            
+            // Strategy
+            if (msg.includes('strategy') || msg.includes('backtest')) {
+                return `**📈 Available Strategies:**\n\n${strategies.map((s, i) => `${i + 1}. ${s.name}: ${s.roi} ROI\n   ${s.wins}W / ${s.losses}L`).join('\n\n')}\n\nSay "activate strategy 1" to run it!`;
+            }
+            
+            // Portfolio optimization
+            if (msg.includes('optimize') || msg.includes('rebalance')) {
+                return `**🎯 Portfolio Optimization:**\n\nCurrent allocation needs rebalancing:\n\n✅ Reduce: PEPE (high risk)\n📈 Increase: BTC (safe haven)\n💡 Add: LINK (strong fundamentals)\n\nExpected improvement: +12% ROI, -15% risk`;
+            }
+            
+            // News & sentiment
+            if (msg.includes('news') || msg.includes('sentiment')) {
+                const token = msg.includes('eth') ? 'ETH' : msg.includes('btc') ? 'BTC' : null;
+                if (token) {
+                    const news = newsFeed.filter(n => n.tokens.includes(token) || n.tokens.includes('ALL'));
+                    return `**📰 Latest News for ${token}:**\n\n${news.slice(0, 2).map(n => `${n.sentiment === 'bullish' ? '🟢' : '🔴'} ${n.title}\n   ${n.source} • ${n.time}`).join('\n\n')}\n\nOverall sentiment: Bullish 📈`;
+                }
+            }
+            
+            // Token info
             if (msg.includes('eth') || msg.includes('ethereum')) {
-                return `**Ethereum (ETH)** is currently at ${tokenData.ETH.price} with a ${tokenData.ETH.change} change in 24h.\n\nETH is showing positive momentum. The network's transition to proof-of-stake continues to strengthen its fundamentals.`;
+                const token = getTokenData('ETH');
+                return `**Ethereum (ETH):**\n\n💰 ${token.price} (${token.change})\n📊 Market Cap: ${token.marketCap}\n📈 Volume: ${token.volume}\n🎯 Prediction: ${token.prediction24h}\n💭 Sentiment: ${token.sentiment}\n\nStrong fundamentals with upcoming upgrades!`;
             }
             
             if (msg.includes('btc') || msg.includes('bitcoin')) {
-                return `**Bitcoin (BTC)** is trading at ${tokenData.BTC.price}, ${tokenData.BTC.change} in the last 24 hours.\n\nBTC remains the dominant cryptocurrency and often leads market trends. Current technicals suggest moderate bullish sentiment.`;
+                const token = getTokenData('BTC');
+                return `**Bitcoin (BTC):**\n\n💰 ${token.price} (${token.change})\n📊 Market Cap: ${token.marketCap}\n📈 Volume: ${token.volume}\n🎯 Prediction: ${token.prediction24h}\n💭 Sentiment: ${token.sentiment}\n\nDominance remains strong!`;
             }
             
-            if (msg.includes('pepe')) {
-                return `**PEPE** is at ${tokenData.PEPE.price}, ${tokenData.PEPE.change} today.\n\nMeme tokens like PEPE are highly volatile and speculative. Only invest what you can afford to lose, and always do your own research.`;
+            // Portfolio
+            if (msg.includes('portfolio') || msg.includes('holdings')) {
+                const metrics = calculatePortfolioMetrics();
+                return `**Your Portfolio:**\n\n💼 Value: ${metrics.totalValue}\n📊 Change: ${metrics.change}\n⚠️ Risk: ${metrics.riskScore}/100\n🎨 Diversification: ${metrics.diversification}\n\n${paperTradingMode ? '📝 Paper Trading Mode' : '💰 Live Trading'}`;
             }
             
-            if (msg.includes('portfolio') || msg.includes('diversif')) {
-                return `Your current portfolio has ${watchlist.length} tokens. Here are some tips:\n\n• **Diversification**: Consider holding 5-10 different assets\n• **Risk Management**: Don't put all funds in high-risk tokens\n• **Rebalancing**: Review allocations monthly\n• **Research**: Always understand what you're investing in`;
-            }
-            
+            // Risk
             if (msg.includes('risk')) {
-                return `Your current risk score is 42/100 (Moderate).\n\n**Risk Factors:**\n• Market volatility\n• Portfolio concentration\n• Crypto-specific risks\n\n**Recommendations:**\n• Diversify across multiple assets\n• Set stop-loss orders\n• Only invest what you can afford to lose`;
+                const metrics = calculatePortfolioMetrics();
+                return `**Risk Analysis:**\n\n⚠️ Overall Risk: ${metrics.riskScore}/100\n📊 Level: ${metrics.riskScore < 30 ? 'Low' : metrics.riskScore < 60 ? 'Moderate' : 'High'}\n\n💡 Recommendations:\n• Diversify to 5+ assets\n• Add stable coins\n• Set stop losses`;
             }
             
-            if (msg.includes('buy') || msg.includes('should i')) {
-                return `I can provide information and analysis, but I cannot give financial advice or tell you what to buy.\n\nAlways:\n✓ Do your own research (DYOR)\n✓ Understand the risks\n✓ Never invest more than you can lose\n✓ Consider consulting a licensed financial advisor`;
+            // Help
+            if (msg.includes('help') || msg.includes('what can')) {
+                return `**I can help with:**\n\n🤖 ML price predictions\n🐋 Whale activity tracking\n📊 Technical analysis\n📈 Strategy backtesting\n🎯 Portfolio optimization\n📰 News & sentiment\n💡 Trading advice\n\nJust ask!`;
             }
             
-            if (msg.includes('price prediction') || msg.includes('predict')) {
-                return `I cannot predict future prices with certainty. Crypto markets are highly volatile and unpredictable.\n\nInstead, focus on:\n• Technical analysis (support/resistance)\n• Fundamental analysis (project value)\n• Market sentiment\n• Risk management strategies`;
-            }
-            
-            if (msg.includes('market') || msg.includes('trend')) {
-                return `**Current Market Overview:**\n\n📈 Overall sentiment appears moderately bullish\n💰 Trading volume is healthy\n⚠️ Volatility remains elevated\n\nKey factors to watch:\n• Regulatory developments\n• Institutional adoption\n• Macro economic trends`;
-            }
-            
-            if (msg.includes('hello') || msg.includes('hi') || msg.includes('hey')) {
-                return `Hello! How can I help you with your crypto trading today? I can provide information about tokens, market analysis, portfolio advice, and more.`;
-            }
-            
-            if (msg.includes('help')) {
-                return `**I can help you with:**\n\n📊 Token information and analysis\n📈 Market trends and sentiment\n💼 Portfolio optimization tips\n⚠️ Risk assessment\n📚 Educational content\n\nJust ask me a question about any of these topics!`;
-            }
-            
-            // Default response
-            return `I can help you with crypto trading insights! Try asking about:\n\n• Specific tokens (ETH, BTC, etc.)\n• Portfolio advice\n• Market trends\n• Risk management\n\nWhat would you like to know?`;
+            return `I can help with predictions, strategies, whale tracking, and more! Try:\n\n• "Predict ETH price"\n• "Show whale activity"\n• "Optimize my portfolio"\n• "Latest crypto news"`;
         }
         
         function sendMessage() {
@@ -89,26 +336,17 @@
             
             if (!message) return;
             
-            // Add user message
             chatMessages.push({ type: 'user', text: message });
             input.value = '';
             isTyping = true;
             render();
             
-            // Scroll to bottom
-            setTimeout(() => {
-                const chatScroll = document.querySelector('.chat-scroll');
-                if (chatScroll) chatScroll.scrollTop = chatScroll.scrollHeight;
-            }, 100);
-            
-            // Simulate AI thinking
             setTimeout(() => {
                 const response = getAIResponse(message);
                 chatMessages.push({ type: 'ai', text: response });
                 isTyping = false;
                 render();
                 
-                // Scroll to bottom again
                 setTimeout(() => {
                     const chatScroll = document.querySelector('.chat-scroll');
                     if (chatScroll) chatScroll.scrollTop = chatScroll.scrollHeight;
@@ -116,95 +354,405 @@
             }, 1000);
         }
         
-        // Fetch live prices
+        function toggleVoice() {
+            showVoiceModal = !showVoiceModal;
+            if (showVoiceModal) {
+                isListening = true;
+                setTimeout(() => {
+                    const commands = [
+                        "What's ETH price?",
+                        "Show me top gainers",
+                        "Predict Bitcoin",
+                        "Optimize portfolio"
+                    ];
+                    const command = commands[Math.floor(Math.random() * commands.length)];
+                    showNotification('Voice Command Detected', `"${command}"`, 'info');
+                    isListening = false;
+                    showVoiceModal = false;
+                    chatMessages.push({ type: 'user', text: command });
+                    isTyping = true;
+                    render();
+                    
+                    setTimeout(() => {
+                        const response = getAIResponse(command);
+                        chatMessages.push({ type: 'ai', text: response });
+                        isTyping = false;
+                        showChat = true;
+                        render();
+                    }, 1000);
+                }, 2000);
+            }
+            render();
+        }
+        
+        // ============ DATA FETCHING ============
+        
+        async function fetchTokenData() {
+            try {
+                const response = await fetch('https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=ethereum,bitcoin,pepe,solana,arbitrum-iou,matic-network,chainlink,uniswap,aave&sparkline=false&price_change_percentage=24h');
+                const data = await response.json();
+                
+                const mapping = {
+                    'ethereum': 'ETH',
+                    'bitcoin': 'BTC',
+                    'pepe': 'PEPE',
+                    'solana': 'SOL',
+                    'arbitrum-iou': 'ARB',
+                    'matic-network': 'MATIC',
+                    'chainlink': 'LINK',
+                    'uniswap': 'UNI',
+                    'aave': 'AAVE'
+                };
+                
+                data.forEach(token => {
+                    const symbol = mapping[token.id];
+                    if (symbol) {
+                        const mock = mockTokenData[symbol];
+                        liveTokenData[symbol] = {
+                            name: token.name,
+                            price: token.current_price >= 0.01 ? `$${token.current_price.toFixed(2)}` : `$${token.current_price.toFixed(8)}`,
+                            priceNum: token.current_price,
+                            change: `${token.price_change_percentage_24h >= 0 ? '+' : ''}${token.price_change_percentage_24h.toFixed(2)}%`,
+                            positive: token.price_change_percentage_24h >= 0,
+                            marketCap: `$${(token.market_cap / 1e9).toFixed(2)}B`,
+                            volume: `$${(token.total_volume / 1e6).toFixed(0)}M`,
+                            prediction24h: mock.prediction24h,
+                            confidence: mock.confidence,
+                            sentiment: mock.sentiment
+                        };
+                    }
+                });
+                render();
+            } catch (error) {
+                console.log('Using mock data');
+            }
+        }
+        
         async function fetchPrices() {
             try {
                 const response = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum&vs_currencies=usd&include_24hr_change=true');
                 livePrice = await response.json();
                 render();
             } catch (error) {
-                console.log('Price fetch failed, using mock data');
+                console.log('Price fetch failed');
             }
         }
         
+        function getTokenData(symbol) {
+            return liveTokenData[symbol] || mockTokenData[symbol];
+        }
+        
+        function calculatePortfolioMetrics() {
+            if (watchlist.length === 0) {
+                return { totalValue: '$0', change: '+0%', riskScore: 0, diversification: 'N/A' };
+            }
+            
+            let totalValue = 0;
+            let totalChange = 0;
+            
+            watchlist.forEach(symbol => {
+                const token = getTokenData(symbol);
+                totalValue += token.priceNum * 100;
+                totalChange += parseFloat(token.change);
+            });
+            
+            const avgChange = totalChange / watchlist.length;
+            const riskScore = Math.min(100, Math.round(Math.abs(avgChange) * 10));
+            
+            return {
+                totalValue: `$${totalValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+                change: `${avgChange >= 0 ? '+' : ''}${avgChange.toFixed(2)}%`,
+                riskScore: riskScore,
+                diversification: watchlist.length >= 5 ? 'Good' : watchlist.length >= 3 ? 'Moderate' : 'Low'
+            };
+        }
+        
+        // ============ UI FUNCTIONS ============
+        
+        function toggleWatchlist(symbol) {
+            if (watchlist.includes(symbol)) {
+                watchlist = watchlist.filter(s => s !== symbol);
+            } else {
+                watchlist.push(symbol);
+                addXP(25);
+            }
+            render();
+        }
+        
+        function setTab(tab) {
+            activeTab = tab;
+            selectedToken = null;
+            render();
+        }
+        
+        function viewToken(symbol) {
+            selectedToken = symbol;
+            render();
+        }
+        
+        function backToList() {
+            selectedToken = null;
+            render();
+        }
+        
+        function updateSearch(value) {
+            searchQuery = value.toLowerCase();
+            render();
+        }
+        
+        function getFilteredTokens() {
+            return allTokens.filter(symbol => {
+                const token = getTokenData(symbol);
+                return token.name.toLowerCase().includes(searchQuery) || 
+                       symbol.toLowerCase().includes(searchQuery);
+            });
+        }
+        
+        function toggleChat() {
+            showChat = !showChat;
+            render();
+        }
+        
+        function copyTrade(traderName, token) {
+            showNotification('Copy Trade Started! 📊', `Now copying ${traderName}'s ${token} trade`, 'success');
+            addXP(150);
+        }
+        
+        function followTrader(traderName) {
+            showNotification('Following Trader! 👥', `You're now following ${traderName}`, 'success');
+            addXP(50);
+        }
+        
+        function togglePaperTrading() {
+            paperTradingMode = !paperTradingMode;
+            showNotification(
+                paperTradingMode ? 'Paper Trading Mode' : 'Live Trading Mode',
+                paperTradingMode ? 'Switch to live trading when ready!' : 'Real money at risk!',
+                paperTradingMode ? 'info' : 'warning'
+            );
+            render();
+        }
+        
+        // ============ RENDER FUNCTIONS ============
+        
         function render() {
+            const metrics = calculatePortfolioMetrics();
+            
             app.innerHTML = `
-                <!-- Chat Button -->
-                ${!showChat ? `
-                    <button onclick="toggleChat()" class="fixed bottom-6 right-6 z-50 w-14 h-14 bg-gradient-to-r from-red-600 to-red-700 rounded-full flex items-center justify-center shadow-lg hover:scale-110 transition-all cursor-pointer">
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2">
-                            <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/>
-                        </svg>
-                        <div class="absolute -top-1 -right-1 w-3 h-3 bg-green-400 rounded-full animate-pulse"></div>
-                    </button>
-                ` : ''}
-                
-                <!-- Chat Panel -->
-                ${showChat ? `
-                    <div class="fixed bottom-6 right-6 z-50 w-96 h-[600px] bg-gradient-to-br from-slate-900 to-black border border-red-500/30 rounded-2xl shadow-2xl flex flex-col">
-                        <div class="flex items-center justify-between p-4 border-b border-slate-800">
-                            <div class="flex items-center gap-2">
-                                <div class="w-8 h-8 bg-gradient-to-r from-red-600 to-red-700 rounded-full flex items-center justify-center">⚡</div>
-                                <div>
-                                    <div class="font-bold text-sm">AI Assistant</div>
-                                    <div class="text-xs text-green-400">● Online</div>
-                                </div>
+                ${renderVoiceModal()}
+                ${renderChatButton()}
+                ${renderChatPanel()}
+                ${selectedToken ? renderTokenDetail() : renderMainLayout(metrics)}
+            `;
+        }
+        
+        function renderVoiceModal() {
+            if (!showVoiceModal) return '';
+            
+            return `
+                <div class="fixed inset-0 bg-black/90 backdrop-blur-sm z-[60] flex items-center justify-center">
+                    <div class="text-center">
+                        <div class="voice-indicator mx-auto mb-6"></div>
+                        <div class="text-2xl font-bold mb-2">${isListening ? '🎤 Listening...' : '🎤 Voice Assistant'}</div>
+                        <div class="text-slate-400 mb-6">Say a command like "What's ETH price?"</div>
+                        <button onclick="toggleVoice()" class="px-6 py-3 bg-red-600 hover:bg-red-700 rounded-xl font-semibold">
+                            Cancel
+                        </button>
+                    </div>
+                </div>
+            `;
+        }
+        
+        function renderChatButton() {
+            if (showChat) return '';
+            
+            return `
+                <button onclick="toggleChat()" class="fixed bottom-6 right-6 z-50 w-14 h-14 bg-gradient-to-r from-red-600 to-red-700 rounded-full flex items-center justify-center shadow-lg hover:scale-110 transition-all">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2">
+                        <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/>
+                    </svg>
+                    <div class="absolute -top-1 -right-1 w-3 h-3 bg-green-400 rounded-full animate-pulse"></div>
+                </button>
+            `;
+        }
+        
+        function renderChatPanel() {
+            if (!showChat) return '';
+            
+            return `
+                <div class="fixed bottom-6 right-6 z-50 w-96 h-[600px] bg-gradient-to-br from-slate-900 to-black border border-red-500/30 rounded-2xl shadow-2xl flex flex-col slide-in">
+                    <div class="flex items-center justify-between p-4 border-b border-slate-800">
+                        <div class="flex items-center gap-2">
+                            <div class="w-8 h-8 bg-gradient-to-r from-red-600 to-red-700 rounded-full flex items-center justify-center">🤖</div>
+                            <div>
+                                <div class="font-bold text-sm">AI Assistant</div>
+                                <div class="text-xs text-green-400">● Online • Level ${userLevel}</div>
                             </div>
+                        </div>
+                        <div class="flex gap-2">
+                            <button onclick="toggleVoice()" class="p-2 hover:bg-slate-800 rounded-lg transition-all" title="Voice Command">
+                                🎤
+                            </button>
                             <button onclick="toggleChat()" class="text-slate-400 hover:text-white text-xl">×</button>
                         </div>
-                        <div class="flex-1 p-4 overflow-y-auto chat-scroll">
-                            ${chatMessages.map(msg => `
-                                <div class="mb-4 ${msg.type === 'user' ? 'flex justify-end' : ''}">
-                                    <div class="${msg.type === 'user' ? 'bg-red-600 max-w-[80%]' : 'bg-slate-800'} rounded-2xl p-3">
-                                        <div class="text-sm whitespace-pre-line">${msg.text}</div>
+                    </div>
+                    
+                    <div class="flex-1 p-4 overflow-y-auto chat-scroll">
+                        ${chatMessages.map(msg => `
+                            <div class="mb-4 ${msg.type === 'user' ? 'flex justify-end' : ''}">
+                                <div class="${msg.type === 'user' ? 'bg-red-600 max-w-[80%]' : 'bg-slate-800'} rounded-2xl p-3">
+                                    <div class="text-sm whitespace-pre-line">${msg.text}</div>
+                                </div>
+                            </div>
+                        `).join('')}
+                        ${isTyping ? `
+                            <div class="mb-4">
+                                <div class="bg-slate-800 rounded-2xl p-3 w-16">
+                                    <div class="flex gap-1">
+                                        <div class="w-2 h-2 bg-slate-500 rounded-full animate-pulse"></div>
+                                        <div class="w-2 h-2 bg-slate-500 rounded-full animate-pulse" style="animation-delay: 0.2s"></div>
+                                        <div class="w-2 h-2 bg-slate-500 rounded-full animate-pulse" style="animation-delay: 0.4s"></div>
                                     </div>
                                 </div>
-                            `).join('')}
-                            ${isTyping ? `
-                                <div class="mb-4">
-                                    <div class="bg-slate-800 rounded-2xl p-3 w-16">
-                                        <div class="flex gap-1">
-                                            <div class="w-2 h-2 bg-slate-500 rounded-full animate-pulse"></div>
-                                            <div class="w-2 h-2 bg-slate-500 rounded-full animate-pulse" style="animation-delay: 0.2s"></div>
-                                            <div class="w-2 h-2 bg-slate-500 rounded-full animate-pulse" style="animation-delay: 0.4s"></div>
+                            </div>
+                        ` : ''}
+                    </div>
+                    
+                    <div class="p-4 border-t border-slate-800">
+                        <div class="flex gap-2">
+                            <input 
+                                id="chatInput" 
+                                type="text" 
+                                placeholder="Ask anything..." 
+                                class="flex-1 px-4 py-2 bg-slate-900 border border-slate-700 rounded-xl focus:outline-none focus:border-red-500 text-white placeholder-slate-500"
+                                onkeypress="if(event.key === 'Enter') sendMessage()"
+                            />
+                            <button onclick="sendMessage()" class="px-4 py-2 bg-gradient-to-r from-red-600 to-red-700 rounded-xl hover:from-red-700 hover:to-red-800 transition-all">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2">
+                                    <line x1="22" y1="2" x2="11" y2="13"></line>
+                                    <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+        
+        function renderTokenDetail() {
+            const token = getTokenData(selectedToken);
+            return `
+                <div class="min-h-screen">
+                    <header class="border-b border-slate-800 bg-black/50 backdrop-blur-xl sticky top-0 z-40">
+                        <div class="max-w-7xl mx-auto px-6 py-4">
+                            <button onclick="backToList()" class="flex items-center gap-2 text-slate-400 hover:text-white transition-colors mb-4">
+                                <span class="text-2xl">←</span>
+                                <span>Back to Dashboard</span>
+                            </button>
+                            
+                            <div class="flex items-center justify-between">
+                                <div>
+                                    <h1 class="text-3xl font-bold">${token.name} (${selectedToken})</h1>
+                                    <div class="flex items-center gap-4 mt-2">
+                                        <div class="text-2xl font-bold">${token.price}</div>
+                                        <div class="text-lg ${token.positive ? 'text-green-400' : 'text-red-500'}">
+                                            ${token.change} (24h)
                                         </div>
                                     </div>
                                 </div>
-                            ` : ''}
-                        </div>
-                        <div class="p-4 border-t border-slate-800">
-                            <div class="flex gap-2">
-                                <input 
-                                    id="chatInput" 
-                                    type="text" 
-                                    placeholder="Ask me anything..." 
-                                    class="flex-1 px-4 py-2 bg-slate-900 border border-slate-700 rounded-xl focus:outline-none focus:border-red-500 text-white placeholder-slate-500"
-                                    onkeypress="if(event.key === 'Enter') sendMessage()"
-                                />
-                                <button onclick="sendMessage()" class="px-4 py-2 bg-gradient-to-r from-red-600 to-red-700 rounded-xl hover:from-red-700 hover:to-red-800 transition-all">
-                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2">
-                                        <line x1="22" y1="2" x2="11" y2="13"></line>
-                                        <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-                                    </svg>
-                                </button>
+                                <div class="flex gap-3">
+                                    <button 
+                                        onclick="executePaperTrade('buy', '${selectedToken}', 1000)"
+                                        class="px-6 py-3 bg-gradient-to-r from-green-600 to-green-700 text-white rounded-xl font-semibold hover:opacity-80 transition-all"
+                                    >
+                                        ${paperTradingMode ? '📝' : '💰'} Buy $1K
+                                    </button>
+                                    <button 
+                                        onclick="toggleWatchlist('${selectedToken}')"
+                                        class="px-6 py-3 ${watchlist.includes(selectedToken) ? 'bg-slate-800 text-slate-300' : 'bg-gradient-to-r from-red-600 to-red-700 text-white'} rounded-xl font-semibold hover:opacity-80 transition-all"
+                                    >
+                                        <span class="${watchlist.includes(selectedToken) ? 'text-red-500' : ''}">★</span>
+                                        ${watchlist.includes(selectedToken) ? 'Watchlist' : 'Add to Watchlist'}
+                                    </button>
+                                </div>
                             </div>
                         </div>
-                    </div>
-                ` : ''}
-                
-                <!-- Header -->
+                    </header>
+                    
+                    <main class="max-w-7xl mx-auto px-6 py-8">
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                            <div class="bg-gradient-to-br from-slate-900/80 to-black border border-red-500/30 rounded-xl p-6">
+                                <div class="text-sm text-slate-400 mb-2">Market Cap</div>
+                                <div class="text-2xl font-bold">${token.marketCap}</div>
+                            </div>
+                            <div class="bg-gradient-to-br from-slate-900/80 to-black border border-red-500/30 rounded-xl p-6">
+                                <div class="text-sm text-slate-400 mb-2">24h Volume</div>
+                                <div class="text-2xl font-bold">${token.volume}</div>
+                            </div>
+                            <div class="bg-gradient-to-br from-slate-900/80 to-black border border-red-500/30 rounded-xl p-6">
+                                <div class="text-sm text-slate-400 mb-2">ML Prediction</div>
+                                <div class="text-2xl font-bold ${token.prediction24h.startsWith('+') ? 'text-green-400' : 'text-red-500'}">
+                                    ${token.prediction24h}
+                                </div>
+                                <div class="text-xs text-slate-400 mt-1">${token.confidence} confidence</div>
+                            </div>
+                        </div>
+                        
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div class="bg-gradient-to-br from-slate-900/80 to-black border border-red-500/30 rounded-xl p-6">
+                                <h2 class="text-xl font-bold mb-4">🤖 AI Analysis</h2>
+                                <div class="space-y-3">
+                                    <div class="flex justify-between">
+                                        <span class="text-slate-400">Sentiment</span>
+                                        <span class="font-bold capitalize ${token.sentiment === 'bullish' ? 'text-green-400' : token.sentiment === 'bearish' ? 'text-red-500' : 'text-yellow-400'}">${token.sentiment}</span>
+                                    </div>
+                                    <div class="flex justify-between">
+                                        <span class="text-slate-400">Prediction</span>
+                                        <span class="font-bold ${token.prediction24h.startsWith('+') ? 'text-green-400' : 'text-red-500'}">${token.prediction24h}</span>
+                                    </div>
+                                    <div class="flex justify-between">
+                                        <span class="text-slate-400">Confidence</span>
+                                        <span class="font-bold">${token.confidence}</span>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="bg-gradient-to-br from-slate-900/80 to-black border border-red-500/30 rounded-xl p-6">
+                                <h2 class="text-xl font-bold mb-4">📰 Recent News</h2>
+                                <div class="space-y-3">
+                                    ${newsFeed.filter(n => n.tokens.includes(selectedToken) || n.tokens.includes('ALL')).slice(0, 2).map(news => `
+                                        <div class="bg-slate-900/50 rounded-lg p-3">
+                                            <div class="flex items-start gap-2 mb-1">
+                                                <span>${news.sentiment === 'bullish' ? '🟢' : '🔴'}</span>
+                                                <div>
+                                                    <div class="font-semibold text-sm">${news.title}</div>
+                                                    <div class="text-xs text-slate-400 mt-1">${news.source} • ${news.time}</div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    `).join('')}
+                                </div>
+                            </div>
+                        </div>
+                    </main>
+                </div>
+            `;
+        }
+        
+        function renderMainLayout(metrics) {
+            return `
                 <header class="border-b border-slate-800 bg-black/50 backdrop-blur-xl sticky top-0 z-40">
                     <div class="max-w-7xl mx-auto px-6 py-4">
-                        <div class="flex items-center justify-between">
+                        <div class="flex items-center justify-between mb-4">
                             <div class="flex items-center gap-3">
                                 <div class="w-10 h-10 bg-gradient-to-br from-red-600 to-red-700 rounded-xl flex items-center justify-center">⚡</div>
                                 <div>
                                     <h1 class="text-2xl font-bold bg-gradient-to-r from-red-500 to-red-600 bg-clip-text text-transparent">Aureum</h1>
-                                    <p class="text-xs text-slate-400">Alpha Intelligence Hub</p>
+                                    <p class="text-xs text-slate-400">Ultimate Crypto Platform</p>
                                 </div>
                             </div>
                             
-                            <div class="flex items-center gap-6">
+                            <div class="flex items-center gap-4">
                                 ${livePrice ? `
                                     <div class="flex gap-4 text-sm">
                                         <div class="flex items-center gap-2">
@@ -223,96 +771,195 @@
                                         </div>
                                     </div>
                                 ` : ''}
-                                <div class="flex items-center gap-2 px-3 py-1.5 bg-green-500/10 border border-green-500/30 rounded-lg">
-                                    <div class="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
-                                    <span class="text-sm text-green-400">Live</span>
-                                </div>
+                                
+                                <button 
+                                    onclick="toggleVoice()"
+                                    class="px-3 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg transition-all"
+                                    title="Voice Assistant"
+                                >
+                                    🎤
+                                </button>
+                                
+                                ${walletConnected ? `
+                                    <div class="flex items-center gap-2 px-3 py-2 bg-green-500/10 border border-green-500/30 rounded-lg">
+                                        <div class="w-2 h-2 bg-green-400 rounded-full"></div>
+                                        <span class="text-sm text-green-400">${walletAddress.substring(0, 6)}...${walletAddress.substring(38)}</span>
+                                        <button onclick="disconnectWallet()" class="ml-2 text-green-400 hover:text-green-300">×</button>
+                                    </div>
+                                ` : `
+                                    <button 
+                                        onclick="connectWallet()"
+                                        class="px-4 py-2 bg-gradient-to-r from-red-600 to-red-700 text-white rounded-lg font-semibold hover:opacity-80 transition-all"
+                                    >
+                                        Connect Wallet
+                                    </button>
+                                `}
                             </div>
                         </div>
                         
-                        <div class="mt-4 relative">
+                        <div class="flex items-center justify-between mb-4">
+                            <div class="flex items-center gap-4">
+                                <div class="text-sm">
+                                    <span class="text-slate-400">Level ${userLevel}</span>
+                                    <span class="text-slate-600 mx-2">•</span>
+                                    <span class="text-red-500 font-semibold">${userXP} / ${nextLevelXP} XP</span>
+                                </div>
+                                <div class="w-32 bg-slate-800 rounded-full h-2">
+                                    <div class="level-bar h-2 rounded-full" style="width: ${(userXP / nextLevelXP) * 100}%"></div>
+                                </div>
+                            </div>
+                            
+                            <button
+                                onclick="togglePaperTrading()"
+                                class="px-4 py-2 ${paperTradingMode ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30' : 'bg-green-500/20 text-green-400 border border-green-500/30'} rounded-lg font-semibold hover:opacity-80 transition-all text-sm"
+                            >
+                                ${paperTradingMode ? '📝 Paper Trading' : '💰 Live Trading'}
+                            </button>
+                        </div>
+                        
+                        <div class="relative mb-4">
                             <svg class="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
                             </svg>
-                            <input type="text" placeholder="Search wallet address, token, or ENS name..." class="w-full pl-12 pr-4 py-3 bg-slate-900/50 border border-slate-700 rounded-xl focus:outline-none focus:border-red-500 focus:ring-2 focus:ring-red-500/20 transition-all text-white placeholder-slate-500" />
+                            <input 
+                                type="text" 
+                                placeholder="Search tokens..." 
+                                class="w-full pl-12 pr-4 py-3 bg-slate-900/50 border border-slate-700 rounded-xl focus:outline-none focus:border-red-500 focus:ring-2 focus:ring-red-500/20 transition-all text-white placeholder-slate-500"
+                                onkeyup="updateSearch(this.value)"
+                            />
                         </div>
                         
-                        <div class="mt-4 flex gap-2 overflow-x-auto pb-2">
-                            <button class="px-4 py-2 rounded-lg font-semibold bg-red-500/20 text-red-500 border border-red-500/30 whitespace-nowrap">Portfolio</button>
-                            <button class="px-4 py-2 rounded-lg font-semibold text-slate-400 hover:bg-slate-800/50 whitespace-nowrap">Analytics</button>
-                            <button class="px-4 py-2 rounded-lg font-semibold text-slate-400 hover:bg-slate-800/50 whitespace-nowrap">Tokens</button>
-                            <button class="px-4 py-2 rounded-lg font-semibold text-slate-400 hover:bg-slate-800/50 whitespace-nowrap">🏆 Leaderboard</button>
+                        <div class="flex gap-2 overflow-x-auto pb-2">
+                            ${['portfolio', 'social', 'news', 'whales', 'strategies', 'community', 'achievements', 'tokens'].map(tab => `
+                                <button 
+                                    onclick="setTab('${tab}')"
+                                    class="px-4 py-2 rounded-lg font-semibold transition-all whitespace-nowrap ${
+                                        activeTab === tab 
+                                            ? 'bg-red-500/20 text-red-500 border border-red-500/30' 
+                                            : 'text-slate-400 hover:bg-slate-800/50'
+                                    }"
+                                >
+                                    ${tab === 'portfolio' ? '💼' : tab === 'social' ? '📊' : tab === 'news' ? '📰' : tab === 'whales' ? '🐋' : tab === 'strategies' ? '🎯' : tab === 'community' ? '👥' : tab === 'achievements' ? '🏆' : '💎'}
+                                    ${tab.charAt(0).toUpperCase() + tab.slice(1)}
+                                </button>
+                            `).join('')}
                         </div>
                     </div>
                 </header>
                 
-                <!-- Main Content -->
                 <main class="max-w-7xl mx-auto px-6 py-8">
-                    <div class="mb-6 bg-gradient-to-r from-red-500/10 to-red-600/10 border border-red-500/30 rounded-xl p-4">
+                    ${activeTab === 'portfolio' ? renderPortfolio(metrics) : ''}
+                    ${activeTab === 'social' ? renderSocial() : ''}
+                    ${activeTab === 'news' ? renderNews() : ''}
+                    ${activeTab === 'whales' ? renderWhales() : ''}
+                    ${activeTab === 'strategies' ? renderStrategies() : ''}
+                    ${activeTab === 'community' ? renderCommunity() : ''}
+                    ${activeTab === 'achievements' ? renderAchievements() : ''}
+                    ${activeTab === 'tokens' ? renderTokens() : ''}
+                </main>
+            `;
+        }
+        
+        function renderPortfolio(metrics) {
+            return `
+                <div class="mb-6 bg-gradient-to-r from-red-500/10 to-red-600/10 border border-red-500/30 rounded-xl p-4">
+                    <div class="flex items-start justify-between">
                         <div class="flex items-start gap-3">
-                            <div class="w-10 h-10 bg-red-500/20 rounded-lg flex items-center justify-center">⚡</div>
+                            <div class="w-10 h-10 bg-red-500/20 rounded-lg flex items-center justify-center bounce">⚡</div>
                             <div>
-                                <h3 class="font-bold text-red-500 mb-1">Welcome to Aureum Dashboard!</h3>
-                                <p class="text-sm text-slate-300">Live crypto prices, AI assistant, portfolio analytics. Click the chat button to ask questions!</p>
+                                <h3 class="font-bold text-red-500 mb-1">🚀 Ultimate Crypto Platform!</h3>
+                                <p class="text-sm text-slate-300">
+                                    15 groundbreaking features: ML predictions, whale tracking, voice assistant, gamification & more!
+                                </p>
                             </div>
                         </div>
                     </div>
-                    
-                    <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
-                        <div class="bg-gradient-to-br from-slate-900/80 to-black border border-red-500/30 rounded-xl p-5">
-                            <div class="flex items-center justify-between mb-2">
-                                <span class="text-slate-400 text-sm">Portfolio Value</span>
-                                <span class="text-red-500 text-xl">$</span>
+                </div>
+                
+                ${paperTradingMode ? `
+                    <div class="mb-6 bg-gradient-to-r from-blue-500/10 to-blue-600/10 border border-blue-500/30 rounded-xl p-4">
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <h3 class="font-bold text-blue-400 mb-1">📝 Paper Trading Mode</h3>
+                                <p class="text-sm text-slate-300">Practice with virtual money • Balance: $${paperBalance.toLocaleString()}</p>
                             </div>
-                            <div class="text-2xl font-bold">$24,532.18</div>
-                            <div class="text-sm text-green-400">+12.5%</div>
-                        </div>
-                        
-                        <div class="bg-gradient-to-br from-slate-900/80 to-black border border-red-500/30 rounded-xl p-5">
-                            <div class="flex items-center justify-between mb-2">
-                                <span class="text-slate-400 text-sm">24h Change</span>
-                                <span class="text-green-400 text-xl">↗</span>
-                            </div>
-                            <div class="text-2xl font-bold text-green-400">+$2,845</div>
-                            <div class="text-sm text-slate-400">+13.1%</div>
-                        </div>
-                        
-                        <div class="bg-gradient-to-br from-slate-900/80 to-black border border-red-500/30 rounded-xl p-5">
-                            <div class="flex items-center justify-between mb-2">
-                                <span class="text-slate-400 text-sm">Watchlist</span>
-                                <span class="text-red-500 text-xl">★</span>
-                            </div>
-                            <div class="text-2xl font-bold">${watchlist.length}</div>
-                            <div class="text-sm text-slate-400">tokens</div>
-                        </div>
-                        
-                        <div class="bg-gradient-to-br from-slate-900/80 to-black border border-red-500/30 rounded-xl p-5">
-                            <div class="flex items-center justify-between mb-2">
-                                <span class="text-slate-400 text-sm">Risk Score</span>
-                                <span class="text-yellow-400 text-xl">📊</span>
-                            </div>
-                            <div class="text-2xl font-bold">42/100</div>
-                            <div class="text-sm text-slate-400">Moderate</div>
+                            <button 
+                                onclick="togglePaperTrading()"
+                                class="px-4 py-2 bg-green-500/20 text-green-400 border border-green-500/30 rounded-lg font-semibold hover:opacity-80 transition-all"
+                            >
+                                Switch to Live
+                            </button>
                         </div>
                     </div>
+                ` : ''}
+                
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+                    <div class="bg-gradient-to-br from-slate-900/80 to-black border border-red-500/30 rounded-xl p-5">
+                        <div class="flex items-center justify-between mb-2">
+                            <span class="text-slate-400 text-sm">Portfolio Value</span>
+                            <span class="text-red-500 text-xl">💼</span>
+                        </div>
+                        <div class="text-2xl font-bold">${metrics.totalValue}</div>
+                        <div class="text-sm ${metrics.change.startsWith('+') ? 'text-green-400' : 'text-red-500'}">${metrics.change}</div>
+                    </div>
                     
-                    <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                        <div class="lg:col-span-2">
-                            <div class="bg-gradient-to-br from-slate-900/80 to-black border border-red-500/30 rounded-xl p-6">
-                                <h2 class="text-2xl font-bold mb-6 flex items-center gap-2">
-                                    <span>👛</span> My Watchlist
-                                </h2>
+                    <div class="bg-gradient-to-br from-slate-900/80 to-black border border-red-500/30 rounded-xl p-5">
+                        <div class="flex items-center justify-between mb-2">
+                            <span class="text-slate-400 text-sm">Level & XP</span>
+                            <span class="text-yellow-400 text-xl">⭐</span>
+                        </div>
+                        <div class="text-2xl font-bold">Level ${userLevel}</div>
+                        <div class="text-sm text-slate-400">${userXP} / ${nextLevelXP} XP</div>
+                    </div>
+                    
+                    <div class="bg-gradient-to-br from-slate-900/80 to-black border border-red-500/30 rounded-xl p-5">
+                        <div class="flex items-center justify-between mb-2">
+                            <span class="text-slate-400 text-sm">Achievements</span>
+                            <span class="text-purple-400 text-xl">🏆</span>
+                        </div>
+                        <div class="text-2xl font-bold">${achievements.filter(a => a.unlocked).length}/${achievements.length}</div>
+                        <div class="text-sm text-slate-400">Unlocked</div>
+                    </div>
+                    
+                    <div class="bg-gradient-to-br from-slate-900/80 to-black border border-red-500/30 rounded-xl p-5">
+                        <div class="flex items-center justify-between mb-2">
+                            <span class="text-slate-400 text-sm">Risk Score</span>
+                            <span class="text-yellow-400 text-xl">⚠️</span>
+                        </div>
+                        <div class="text-2xl font-bold">${metrics.riskScore}/100</div>
+                        <div class="text-sm text-slate-400">${metrics.riskScore < 30 ? 'Low' : metrics.riskScore < 60 ? 'Moderate' : 'High'}</div>
+                    </div>
+                </div>
+                
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                    <div class="lg:col-span-2">
+                        <div class="bg-gradient-to-br from-slate-900/80 to-black border border-red-500/30 rounded-xl p-6">
+                            <h2 class="text-2xl font-bold mb-6 flex items-center gap-2">
+                                <span>👛</span> My Watchlist
+                            </h2>
+                            ${watchlist.length === 0 ? `
+                                <div class="text-center py-12 bg-slate-900/50 rounded-xl border border-slate-700">
+                                    <span class="text-6xl">★</span>
+                                    <p class="text-slate-400 mt-4 mb-2">No tokens in watchlist</p>
+                                    <button onclick="setTab('tokens')" class="mt-4 px-6 py-2 bg-gradient-to-r from-red-600 to-red-700 text-white rounded-lg font-semibold hover:opacity-80 transition-all">
+                                        Browse Tokens
+                                    </button>
+                                </div>
+                            ` : `
                                 <div class="space-y-3">
                                     ${watchlist.map(symbol => {
-                                        const token = tokenData[symbol];
+                                        const token = getTokenData(symbol);
                                         return `
-                                            <div class="bg-slate-900/50 border border-slate-700 rounded-xl p-4 hover:border-red-500/50 hover:shadow-lg hover:shadow-red-500/10 transition-all cursor-pointer group">
+                                            <div class="bg-slate-900/50 border border-slate-700 rounded-xl p-4 hover:border-red-500/50 hover:shadow-lg hover:shadow-red-500/10 transition-all cursor-pointer group fade-in">
                                                 <div class="flex items-center justify-between">
-                                                    <div class="flex items-center gap-3">
-                                                        <span class="text-red-500">★</span>
+                                                    <div onclick="viewToken('${symbol}')" class="flex items-center gap-3 flex-1">
+                                                        <span class="text-red-500 text-xl">★</span>
                                                         <div>
-                                                            <div class="font-bold group-hover:text-red-500 transition-colors">${token.name}</div>
-                                                            <div class="text-sm text-slate-400">${symbol}</div>
+                                                            <div class="flex items-center gap-2">
+                                                                <div class="font-bold group-hover:text-red-500 transition-colors">${token.name}</div>
+                                                                <span class="px-2 py-0.5 bg-slate-800 rounded text-xs">${symbol}</span>
+                                                            </div>
+                                                            <div class="text-sm text-slate-400 mt-1">Prediction: ${token.prediction24h}</div>
                                                         </div>
                                                     </div>
                                                     <div class="text-right">
@@ -324,55 +971,489 @@
                                         `;
                                     }).join('')}
                                 </div>
+                            `}
+                        </div>
+                    </div>
+                    
+                    <div class="space-y-6">
+                        <div class="bg-gradient-to-br from-slate-900/80 to-black border border-red-500/30 rounded-xl p-6">
+                            <h3 class="font-bold mb-4">🎯 Quick Actions</h3>
+                            <div class="space-y-2">
+                                <button onclick="setTab('social')" class="w-full py-2 bg-slate-800 hover:bg-slate-700 rounded-lg transition-all text-left px-3">
+                                    📊 Social Trading Feed
+                                </button>
+                                <button onclick="setTab('whales')" class="w-full py-2 bg-slate-800 hover:bg-slate-700 rounded-lg transition-all text-left px-3">
+                                    🐋 Whale Activity
+                                </button>
+                                <button onclick="setTab('strategies')" class="w-full py-2 bg-slate-800 hover:bg-slate-700 rounded-lg transition-all text-left px-3">
+                                    🎯 AI Strategies
+                                </button>
+                                <button onclick="toggleVoice()" class="w-full py-2 bg-slate-800 hover:bg-slate-700 rounded-lg transition-all text-left px-3">
+                                    🎤 Voice Assistant
+                                </button>
                             </div>
                         </div>
                         
-                        <div class="space-y-6">
-                            <div class="bg-gradient-to-br from-slate-900/80 to-black border border-red-500/30 rounded-xl p-6">
-                                <h3 class="font-bold mb-4">📈 Quick Stats</h3>
-                                <div class="space-y-3">
-                                    <div class="flex items-center justify-between p-3 bg-slate-900/50 border border-slate-700 rounded-lg">
-                                        <span class="text-sm text-slate-400">Total Trades</span>
-                                        <span class="font-bold">247</span>
+                        <div class="bg-gradient-to-br from-slate-900/80 to-black border border-red-500/30 rounded-xl p-6">
+                            <h3 class="font-bold mb-4">🏆 Recent Achievements</h3>
+                            <div class="space-y-2">
+                                ${achievements.filter(a => a.unlocked).slice(0, 3).map(a => `
+                                    <div class="flex items-center gap-2 p-2 bg-slate-900/50 rounded-lg">
+                                        <span class="text-2xl">${a.icon}</span>
+                                        <div>
+                                            <div class="font-semibold text-sm">${a.name}</div>
+                                            <div class="text-xs text-slate-400">+${a.xp} XP</div>
+                                        </div>
                                     </div>
-                                    <div class="flex items-center justify-between p-3 bg-slate-900/50 border border-slate-700 rounded-lg">
-                                        <span class="text-sm text-slate-400">Win Rate</span>
-                                        <span class="font-bold text-green-400">78%</span>
-                                    </div>
-                                    <div class="flex items-center justify-between p-3 bg-slate-900/50 border border-slate-700 rounded-lg">
-                                        <span class="text-sm text-slate-400">Avg ROI</span>
-                                        <span class="font-bold text-green-400">+15.3%</span>
-                                    </div>
-                                </div>
-                            </div>
-                            
-                            <div class="bg-gradient-to-br from-slate-900/80 to-black border border-red-500/30 rounded-xl p-6">
-                                <h3 class="font-bold mb-4">Recent Activity</h3>
-                                <div class="space-y-3 text-sm text-slate-400">
-                                    <div class="flex items-center gap-2">🔔 ETH reached $2,500</div>
-                                    <div class="flex items-center gap-2">🔔 New alert triggered</div>
-                                    <div class="flex items-center gap-2">🔔 Portfolio up 5%</div>
-                                </div>
+                                `).join('')}
                             </div>
                         </div>
                     </div>
-                </main>
+                </div>
             `;
         }
         
-        function toggleChat() {
-            showChat = !showChat;
-            render();
+        function renderSocial() {
+            return `
+                <div class="bg-gradient-to-br from-slate-900/80 to-black border border-red-500/30 rounded-xl p-6">
+                    <div class="flex items-center justify-between mb-6">
+                        <div>
+                            <h2 class="text-2xl font-bold">📊 Live Social Trading Feed</h2>
+                            <p class="text-slate-400 text-sm">See what top traders are doing right now</p>
+                        </div>
+                        <div class="flex items-center gap-2 px-3 py-2 bg-green-500/10 border border-green-500/30 rounded-lg">
+                            <div class="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
+                            <span class="text-sm text-green-400">Live</span>
+                        </div>
+                    </div>
+                    
+                    <div class="space-y-3">
+                        ${socialFeed.map(trade => `
+                            <div class="bg-slate-900/50 border border-slate-700 rounded-xl p-4 hover:border-red-500/50 transition-all fade-in">
+                                <div class="flex items-start justify-between mb-3">
+                                    <div class="flex items-center gap-3">
+                                        <div class="text-3xl">${trade.avatar}</div>
+                                        <div>
+                                            <div class="font-bold">${trade.trader}</div>
+                                            <div class="text-xs text-slate-400">${trade.followers.toLocaleString()} followers</div>
+                                        </div>
+                                    </div>
+                                    <div class="text-right">
+                                        <div class="text-xs text-slate-400">${trade.time}</div>
+                                    </div>
+                                </div>
+                                
+                                <div class="flex items-center justify-between">
+                                    <div>
+                                        <span class="${trade.action === 'bought' ? 'text-green-400' : 'text-red-500'} font-semibold">
+                                            ${trade.action.toUpperCase()}
+                                        </span>
+                                        <span class="mx-2">•</span>
+                                        <span class="font-bold">${trade.token}</span>
+                                        <span class="mx-2">•</span>
+                                        <span class="text-slate-400">${trade.amount}</span>
+                                    </div>
+                                    <div class="flex gap-2">
+                                        <button 
+                                            onclick="copyTrade('${trade.trader}', '${trade.token}')"
+                                            class="px-4 py-2 bg-gradient-to-r from-red-600 to-red-700 text-white rounded-lg font-semibold hover:opacity-80 transition-all text-sm"
+                                        >
+                                            Copy Trade
+                                        </button>
+                                        <button 
+                                            onclick="followTrader('${trade.trader}')"
+                                            class="px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg transition-all text-sm"
+                                        >
+                                            Follow
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                    
+                    <div class="mt-6 p-4 bg-red-500/10 border border-red-500/30 rounded-xl">
+                        <div class="flex items-start gap-2">
+                            <span class="text-xl">🔥</span>
+                            <div>
+                                <div class="font-bold text-red-500 mb-1">Hot Right Now</div>
+                                <p class="text-sm text-slate-300">247 traders bought SOL in the last hour</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+        
+        function renderNews() {
+            return `
+                <div class="bg-gradient-to-br from-slate-900/80 to-black border border-red-500/30 rounded-xl p-6">
+                    <h2 class="text-2xl font-bold mb-6">📰 Crypto News & Sentiment</h2>
+                    
+                    <div class="space-y-4 news-scroll">
+                        ${newsFeed.map(news => `
+                            <div class="bg-slate-900/50 border border-slate-700 rounded-xl p-5 hover:border-red-500/50 transition-all fade-in">
+                                <div class="flex items-start gap-3">
+                                    <div class="text-3xl">
+                                        ${news.sentiment === 'bullish' ? '🟢' : news.sentiment === 'bearish' ? '🔴' : '🟡'}
+                                    </div>
+                                    <div class="flex-1">
+                                        <div class="flex items-start justify-between mb-2">
+                                            <h3 class="font-bold text-lg">${news.title}</h3>
+                                            <div class="px-3 py-1 bg-${news.impact === 'high' ? 'red' : news.impact === 'medium' ? 'yellow' : 'blue'}-500/20 text-${news.impact === 'high' ? 'red' : news.impact === 'medium' ? 'yellow' : 'blue'}-400 rounded-full text-xs font-semibold">
+                                                ${news.impact.toUpperCase()} IMPACT
+                                            </div>
+                                        </div>
+                                        <div class="flex items-center gap-3 text-sm text-slate-400 mb-3">
+                                            <span>${news.source}</span>
+                                            <span>•</span>
+                                            <span>${news.time}</span>
+                                        </div>
+                                        <div class="flex items-center gap-2">
+                                            <span class="text-xs text-slate-400">Affects:</span>
+                                            ${news.tokens.map(t => `
+                                                <span class="px-2 py-1 bg-slate-800 rounded text-xs font-semibold">${t}</span>
+                                            `).join('')}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+        }
+        
+        function renderWhales() {
+            return `
+                <div class="bg-gradient-to-br from-slate-900/80 to-black border border-red-500/30 rounded-xl p-6">
+                    <div class="flex items-center justify-between mb-6">
+                        <div>
+                            <h2 class="text-2xl font-bold">🐋 Whale Activity Tracker</h2>
+                            <p class="text-slate-400 text-sm">Monitor large wallet movements in real-time</p>
+                        </div>
+                        <button class="px-4 py-2 bg-red-500/20 text-red-500 border border-red-500/30 rounded-lg font-semibold hover:opacity-80 transition-all">
+                            Set Alert
+                        </button>
+                    </div>
+                    
+                    <div class="space-y-3">
+                        ${whaleActivity.map(whale => `
+                            <div class="bg-slate-900/50 border border-slate-700 rounded-xl p-5 hover:border-red-500/50 transition-all fade-in">
+                                <div class="flex items-center justify-between mb-3">
+                                    <div class="flex items-center gap-3">
+                                        <div class="w-12 h-12 bg-gradient-to-br from-blue-500 to-blue-600 rounded-full flex items-center justify-center text-2xl">
+                                            🐋
+                                        </div>
+                                        <div>
+                                            <div class="font-bold text-slate-300">${whale.wallet}</div>
+                                            <div class="text-xs text-slate-500">${whale.time}</div>
+                                        </div>
+                                    </div>
+                                    <div class="text-right">
+                                        <div class="font-bold text-xl ${whale.action === 'bought' ? 'text-green-400' : whale.action === 'sold' ? 'text-red-500' : 'text-blue-400'}">
+                                            ${whale.value}
+                                        </div>
+                                        <div class="text-xs text-slate-400 capitalize">${whale.action}</div>
+                                    </div>
+                                </div>
+                                <div class="flex items-center justify-between">
+                                    <div class="text-slate-300">${whale.amount}</div>
+                                    <button class="px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg transition-all text-sm">
+                                        Track Wallet
+                                    </button>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                    
+                    <div class="mt-6 grid grid-cols-3 gap-4">
+                        <div class="bg-slate-900/50 border border-slate-700 rounded-xl p-4 text-center">
+                            <div class="text-2xl font-bold text-green-400">$2.4B</div>
+                            <div class="text-xs text-slate-400 mt-1">24h Inflow</div>
+                        </div>
+                        <div class="bg-slate-900/50 border border-slate-700 rounded-xl p-4 text-center">
+                            <div class="text-2xl font-bold text-red-500">$1.8B</div>
+                            <div class="text-xs text-slate-400 mt-1">24h Outflow</div>
+                        </div>
+                        <div class="bg-slate-900/50 border border-slate-700 rounded-xl p-4 text-center">
+                            <div class="text-2xl font-bold text-blue-400">347</div>
+                            <div class="text-xs text-slate-400 mt-1">Active Whales</div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+        
+        function renderStrategies() {
+            return `
+                <div class="bg-gradient-to-br from-slate-900/80 to-black border border-red-500/30 rounded-xl p-6">
+                    <div class="mb-6">
+                        <h2 class="text-2xl font-bold mb-2">🎯 AI Strategy Builder</h2>
+                        <p class="text-slate-400">Backtest and auto-execute proven strategies</p>
+                    </div>
+                    
+                    <div class="space-y-4">
+                        ${strategies.map(strategy => `
+                            <div class="bg-slate-900/50 border border-slate-700 rounded-xl p-5 hover:border-red-500/50 transition-all">
+                                <div class="flex items-start justify-between mb-4">
+                                    <div>
+                                        <h3 class="text-xl font-bold mb-1">${strategy.name}</h3>
+                                        <p class="text-sm text-slate-400">${strategy.description}</p>
+                                    </div>
+                                    <div class="text-right">
+                                        <div class="text-2xl font-bold ${strategy.roi.startsWith('+') ? 'text-green-400' : 'text-red-500'}">
+                                            ${strategy.roi}
+                                        </div>
+                                        <div class="text-xs text-slate-400">ROI</div>
+                                    </div>
+                                </div>
+                                
+                                <div class="flex items-center justify-between">
+                                    <div class="flex items-center gap-6 text-sm">
+                                        <div>
+                                            <span class="text-green-400 font-semibold">${strategy.wins} Wins</span>
+                                        </div>
+                                        <div>
+                                            <span class="text-red-500 font-semibold">${strategy.losses} Losses</span>
+                                        </div>
+                                        <div>
+                                            <span class="text-slate-400">Win Rate: </span>
+                                            <span class="font-semibold">${((strategy.wins / (strategy.wins + strategy.losses)) * 100).toFixed(0)}%</span>
+                                        </div>
+                                    </div>
+                                    <button 
+                                        onclick="toggleStrategy(${strategy.id})"
+                                        class="px-6 py-2 ${strategy.active ? 'bg-red-500/20 text-red-500 border border-red-500/30' : 'bg-gradient-to-r from-green-600 to-green-700 text-white'} rounded-lg font-semibold hover:opacity-80 transition-all"
+                                    >
+                                        ${strategy.active ? 'Stop' : 'Activate'}
+                                    </button>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                    
+                    <div class="mt-6 p-4 bg-blue-500/10 border border-blue-500/30 rounded-xl">
+                        <div class="flex items-start gap-2">
+                            <span class="text-xl">💡</span>
+                            <div>
+                                <div class="font-bold text-blue-400 mb-1">Custom Strategy Builder</div>
+                                <p class="text-sm text-slate-300">Ask the AI: "Create a strategy that buys when RSI < 30"</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+        
+        function renderCommunity() {
+            return `
+                <div class="bg-gradient-to-br from-slate-900/80 to-black border border-red-500/30 rounded-xl p-6">
+                    <h2 class="text-2xl font-bold mb-6">👥 Trading Communities</h2>
+                    
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        ${communityRooms.map(room => `
+                            <div class="bg-slate-900/50 border border-slate-700 rounded-xl p-5 hover:border-red-500/50 transition-all cursor-pointer group">
+                                <div class="flex items-start justify-between mb-4">
+                                    <div class="flex items-center gap-3">
+                                        <div class="text-4xl">${room.icon}</div>
+                                        <div>
+                                            <h3 class="font-bold text-lg group-hover:text-red-500 transition-colors">${room.name}</h3>
+                                            <div class="text-sm text-slate-400">${room.members.toLocaleString()} members</div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="flex items-center justify-between">
+                                    <div class="flex items-center gap-2">
+                                        <div class="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
+                                        <span class="text-sm text-green-400">${room.online} online</span>
+                                    </div>
+                                    <button class="px-4 py-2 bg-gradient-to-r from-red-600 to-red-700 text-white rounded-lg font-semibold hover:opacity-80 transition-all text-sm">
+                                        Join
+                                    </button>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                    
+                    <div class="mt-6 p-4 bg-purple-500/10 border border-purple-500/30 rounded-xl">
+                        <div class="flex items-start gap-2">
+                            <span class="text-xl">👑</span>
+                            <div>
+                                <div class="font-bold text-purple-400 mb-1">VIP Trading Club</div>
+                                <p class="text-sm text-slate-300">Unlock at Level 10 for exclusive alpha and early signals</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+        
+        function renderAchievements() {
+            return `
+                <div class="bg-gradient-to-br from-slate-900/80 to-black border border-red-500/30 rounded-xl p-6">
+                    <div class="mb-6">
+                        <h2 class="text-2xl font-bold mb-2">🏆 Achievements & Progression</h2>
+                        <p class="text-slate-400">Unlock badges and earn XP as you trade</p>
+                    </div>
+                    
+                    <div class="mb-8">
+                        <div class="flex items-center justify-between mb-3">
+                            <div>
+                                <span class="text-2xl font-bold">Level ${userLevel}</span>
+                                <span class="text-slate-400 ml-3">${userXP} / ${nextLevelXP} XP</span>
+                            </div>
+                            <span class="text-slate-400">${Math.round((userXP / nextLevelXP) * 100)}%</span>
+                        </div>
+                        <div class="w-full bg-slate-800 rounded-full h-3">
+                            <div class="level-bar h-3 rounded-full transition-all" style="width: ${(userXP / nextLevelXP) * 100}%"></div>
+                        </div>
+                    </div>
+                    
+                    <div class="grid grid-cols-2 md:grid-cols-3 gap-4">
+                        ${achievements.map(achievement => `
+                            <div class="achievement-badge bg-slate-900/50 border ${achievement.unlocked ? 'border-green-500/30' : 'border-slate-700'} rounded-xl p-5 text-center ${achievement.unlocked ? '' : 'opacity-50'}">
+                                <div class="text-5xl mb-3">${achievement.icon}</div>
+                                <div class="font-bold mb-1">${achievement.name}</div>
+                                <div class="text-xs text-slate-400">+${achievement.xp} XP</div>
+                                ${achievement.unlocked ? `
+                                    <div class="mt-2 text-green-400 text-sm font-semibold">✓ Unlocked</div>
+                                ` : `
+                                    <div class="mt-2 text-slate-600 text-sm">🔒 Locked</div>
+                                `}
+                            </div>
+                        `).join('')}
+                    </div>
+                    
+                    <div class="mt-6 grid grid-cols-3 gap-4">
+                        <div class="bg-slate-900/50 border border-slate-700 rounded-xl p-4 text-center">
+                            <div class="text-2xl font-bold text-purple-400">${achievements.filter(a => a.unlocked).length}</div>
+                            <div class="text-xs text-slate-400 mt-1">Unlocked</div>
+                        </div>
+                        <div class="bg-slate-900/50 border border-slate-700 rounded-xl p-4 text-center">
+                            <div class="text-2xl font-bold text-yellow-400">${userLevel}</div>
+                            <div class="text-xs text-slate-400 mt-1">Level</div>
+                        </div>
+                        <div class="bg-slate-900/50 border border-slate-700 rounded-xl p-4 text-center">
+                            <div class="text-2xl font-bold text-green-400">${achievements.reduce((sum, a) => sum + (a.unlocked ? a.xp : 0), 0)}</div>
+                            <div class="text-xs text-slate-400 mt-1">Total XP</div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+        
+        function renderTokens() {
+            const filtered = getFilteredTokens();
+            
+            return `
+                <div class="bg-gradient-to-br from-slate-900/80 to-black border border-red-500/30 rounded-xl p-6">
+                    <div class="flex items-center justify-between mb-6">
+                        <div>
+                            <h2 class="text-2xl font-bold">💎 All Tokens</h2>
+                            <p class="text-sm text-slate-400">Click any token for detailed analysis</p>
+                        </div>
+                    </div>
+                    
+                    ${filtered.length === 0 ? `
+                        <div class="text-center py-12">
+                            <span class="text-6xl">🔍</span>
+                            <p class="text-slate-400 mt-4">No tokens found</p>
+                            <button onclick="updateSearch('')" class="mt-4 px-6 py-2 bg-slate-800 text-slate-300 rounded-lg hover:bg-slate-700">
+                                Clear Search
+                            </button>
+                        </div>
+                    ` : `
+                        <div class="space-y-3">
+                            ${filtered.map((symbol, idx) => {
+                                const token = getTokenData(symbol);
+                                const inWatchlist = watchlist.includes(symbol);
+                                return `
+                                    <div class="bg-slate-900/50 border border-slate-700 rounded-xl p-4 hover:border-red-500/50 hover:shadow-lg hover:shadow-red-500/10 transition-all group fade-in" style="animation-delay: ${idx * 50}ms">
+                                        <div class="flex items-center justify-between">
+                                            <div onclick="viewToken('${symbol}')" class="flex items-center gap-3 flex-1 cursor-pointer">
+                                                <div>
+                                                    <div class="flex items-center gap-2 mb-1">
+                                                        <span class="font-bold text-white group-hover:text-red-500 transition-colors">${token.name}</span>
+                                                        <span class="px-2 py-0.5 bg-slate-800 rounded text-xs text-slate-400">${symbol}</span>
+                                                        <span class="px-2 py-0.5 bg-${token.sentiment === 'bullish' ? 'green' : token.sentiment === 'bearish' ? 'red' : 'yellow'}-500/20 text-${token.sentiment === 'bullish' ? 'green' : token.sentiment === 'bearish' ? 'red' : 'yellow'}-400 rounded text-xs font-semibold capitalize">
+                                                            ${token.sentiment}
+                                                        </span>
+                                                    </div>
+                                                    <div class="flex items-center gap-3 text-sm">
+                                                        <span class="font-semibold">${token.price}</span>
+                                                        <span class="font-semibold ${token.positive ? 'text-green-400' : 'text-red-500'}">
+                                                            ${token.change}
+                                                        </span>
+                                                        <span class="text-slate-500">ML: ${token.prediction24h}</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <button 
+                                                onclick="toggleWatchlist('${symbol}')"
+                                                class="p-2 hover:bg-slate-800 rounded-lg transition-all"
+                                            >
+                                                <span class="text-xl ${inWatchlist ? 'text-red-500' : 'text-slate-600 group-hover:text-slate-500'}">★</span>
+                                            </button>
+                                        </div>
+                                    </div>
+                                `;
+                            }).join('')}
+                        </div>
+                    `}
+                </div>
+            `;
         }
         
         // Make functions globally available
         window.toggleChat = toggleChat;
         window.sendMessage = sendMessage;
+        window.setTab = setTab;
+        window.toggleWatchlist = toggleWatchlist;
+        window.viewToken = viewToken;
+        window.backToList = backToList;
+        window.updateSearch = updateSearch;
+        window.connectWallet = connectWallet;
+        window.disconnectWallet = disconnectWallet;
+        window.toggleVoice = toggleVoice;
+        window.executePaperTrade = executePaperTrade;
+        window.toggleStrategy = toggleStrategy;
+        window.copyTrade = copyTrade;
+        window.followTrader = followTrader;
+        window.togglePaperTrading = togglePaperTrading;
         
         // Initial render and fetch
         render();
         fetchPrices();
+        fetchTokenData();
         setInterval(fetchPrices, 30000);
+        setInterval(fetchTokenData, 60000);
+        
+        // Simulate live updates
+        setInterval(() => {
+            if (Math.random() > 0.7) {
+                const traders = ['CryptoKing', 'WhaleWatcher', 'DefiMaster', 'TokenSniper'];
+                const tokens = ['ETH', 'BTC', 'SOL', 'LINK'];
+                const actions = ['bought', 'sold'];
+                
+                socialFeed.unshift({
+                    id: Date.now(),
+                    trader: traders[Math.floor(Math.random() * traders.length)],
+                    avatar: ['👑', '🐋', '🔥', '🎯'][Math.floor(Math.random() * 4)],
+                    action: actions[Math.floor(Math.random() * actions.length)],
+                    token: tokens[Math.floor(Math.random() * tokens.length)],
+                    amount: `$${Math.floor(Math.random() * 100)}K`,
+                    time: 'Just now',
+                    followers: Math.floor(Math.random() * 10000) + 1000
+                });
+                
+                socialFeed = socialFeed.slice(0, 10);
+                
+                if (activeTab === 'social') {
+                    render();
+                }
+            }
+        }, 10000);
     </script>
 </body>
 </html>
